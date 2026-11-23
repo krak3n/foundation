@@ -1,0 +1,31 @@
+version: 2
+
+updates:
+  # Actions are pinned to commit SHAs with the version in a comment; Dependabot
+  # updates both together, and proposes new major versions as pull requests to
+  # review rather than picking them up silently.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+
+  # The YAML provider is a module of its own, so that its parser's advisories can be
+  # fixed without a release of the core. Its requirement on the core is moved by the
+  # release cascade, and isn't a version that can be fetched before a release.
+  - package-ecosystem: gomod
+    directory: /config/yaml
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    ignore:
+      - dependency-name: go.krak3n.dev/foundation
