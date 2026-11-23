@@ -22,6 +22,20 @@ This framework should be as hard to attack as we can make it. **Every new featur
 - **Release pipeline:** the rules under "Release pipeline" below apply to every workflow change.
 - **Record:** findings go in `SECURITY_AUDIT.md`, which is private and must never be committed; `SECURITY.md` is the public policy.
 
+## Pull requests
+
+Every change reaches `main` through a pull request. For an agent, in order of importance:
+
+- **One purpose, small.** A pull request does one thing and can be read in one sitting. Split the work the way the history was: each commit builds and passes its own tests, and later commits build on earlier ones.
+- **Conventional commits.** Every commit message and the pull request title is `type(scope)!: subject`: a type from `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `ci`, `build`, `chore`, `revert`, `style`; an optional scope from `internal`, `config`, `watch`, `interrupt`, `http`, `yaml`, `examples`, `deps`; a lowercase imperative subject with no full stop; a header of at most 72 characters; a blank line, then a body that says why. Add `BREAKING CHANGE:` in the body for a change that breaks the API. release-please reads these to write the changelog and pick the version, and CI refuses a pull request that does not follow them (`.github/scripts/check_commits.py`; run `make check-commits` first). No merge commits in a branch: rebase onto `main`. End a commit made by an agent with the `Co-Authored-By` line the session gives.
+- **Branch, never `main`.** Push a branch and open a pull request. Never push to `main`, never force-push a branch that someone else has looked at, never merge your own pull request, and never change repository settings or bypass a check (`--no-verify`, a skipped or loosened test). Fix the cause, or say it can't be fixed.
+- **Adversarial review before every push.** Review the whole branch diff (`git diff origin/main...HEAD`) as someone who wants to find a fault, and prefer a reviewer that did not write it (a separate agent, or `/code-review`) that is told to look for problems and not to approve. Be nit-picking: correctness and edge cases; the threat model (is an input trusted that should not be, does an error or log carry a configuration value, is a resource unbounded); tests that would pass for the wrong reason (no assertion, checking their own output, a mock of the thing under test); a hostile-input or fuzz test for each new input; public API that did not need to be public; `CLAUDE.md`, the README, `CONFIG.md` and the examples drifting from the code; naming, comment density, dead code and formatting. Fix what it finds, or record why it was left. CI can't check that this happened, so the pull request says so.
+- **The description is honest.** It follows `.github/PULL_REQUEST_TEMPLATE.md`: what, why, how it was verified (the commands and what they said, and anything skipped or not run), the security impact, and the result of the review (how many findings, which were fixed, which were left and why). Never claim a check passed that has not run.
+- **Keep the docs true.** A change updates `CLAUDE.md` (including the CI table), the README, `CONFIG.md` and the examples in the same pull request, and its tests with it.
+- **Nothing private.** Never commit `SECURITY_AUDIT.md` or anything under `/telemetry/`, and never put a configuration value or a secret in a commit, a description or a log.
+
+Merge with a merge commit or a rebase, not a squash, so each commit's message reaches release-please (a squash makes the title the only message, and the title is checked too).
+
 ## Commands
 
 ```bash
@@ -61,7 +75,7 @@ Tools are run from their pinned versions without being installed or added to `go
 
 ### CI at a glance
 
-None of these has run on GitHub yet (the repository is private and this directory is not a git repository); each is checked locally with the command shown. Every job has `contents: read` (release-please also writes), a timeout and SHA-pinned actions.
+Each is checked locally with the command shown, and runs on GitHub for every pull request. Every job has `contents: read` (release-please also writes), a timeout and SHA-pinned actions.
 
 | Workflow / job | Runs on | What it does | Locally |
 |---|---|---|---|
@@ -69,6 +83,7 @@ None of these has run on GitHub yet (the repository is private and this director
 | `ci.yml` / `tooling` | same | `make test-scripts` (the release script's tests and the Python tests of the CI scripts) and `make lint-workflows` (`check_workflows.py`, actionlint, zizmor) on `stable` | `make test-scripts`, `make lint-workflows` |
 | `ci.yml` / `go-version` | same | every `go.mod` says the release before the current stable (`check_go_versions.py`); red when Go ships | `GOVERSION=$(go env GOVERSION) python3 .github/scripts/check_go_versions.py` |
 | `ci.yml` / `staticcheck` | same | `make workspace`, `make staticcheck` (v0.8.2, root and `config/yaml`) on `stable`; zero findings | `make staticcheck` |
+| `ci.yml` / `commits` | pull requests only | `check_commits.py`: every commit since `main` and the title are conventional commits (types, scopes, lowercase subject, 72 characters, no merge commits); the text reaches it only through the environment (`BASE`, `HEAD`, `PR_TITLE`) and is never repeated in what it says | `make check-commits` |
 | `security.yml` / `govulncheck` | push and PR to main, weekly | known vulnerabilities in the root and `config/yaml` (pinned `govulncheck`) on `stable` | `go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...` |
 | `security.yml` / `zizmor` | same | workflow security audit (online in CI) | `zizmor --offline .github` |
 | `release-please.yml` | push to main | opens and updates the release pull request (`.release/`) | n/a |

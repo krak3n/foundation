@@ -50,6 +50,14 @@ test-scripts:
 	bash .github/scripts/test-cascade-yaml.sh
 	python3 -m unittest discover -s .github/scripts
 
+# Every commit of this branch since it left main must be a conventional commit (CI runs
+# the same check on a pull request). MAIN is where the branch is compared from.
+MAIN ?= origin/main
+
+.PHONY: check-commits
+check-commits:
+	python3 .github/scripts/check_commits.py --base "$$(git merge-base $(MAIN) HEAD)" --head "$$(git rev-parse HEAD)"
+
 .PHONY: lint-workflows
 lint-workflows:
 	python3 .github/scripts/check_workflows.py

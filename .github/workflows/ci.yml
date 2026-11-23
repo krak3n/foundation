@@ -109,3 +109,26 @@ jobs:
 
       - name: Staticcheck
         run: make staticcheck
+
+  # The release notes and the next version are written from the commit messages, so
+  # each commit of a pull request, and its title (in case it is squashed), must be
+  # a conventional commit. The text comes from whoever opens the pull request, so it
+  # reaches the script only through the environment and is only ever read.
+  commits:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check the commit messages and the title
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: python3 .github/scripts/check_commits.py --base "$BASE" --head "$HEAD"
