@@ -70,7 +70,7 @@ None of these has run on GitHub yet (the repository is private and this director
 | `ci.yml` / `go-version` | same | every `go.mod` says the release before the current stable (`check_go_versions.py`); red when Go ships | `GOVERSION=$(go env GOVERSION) python3 .github/scripts/check_go_versions.py` |
 | `ci.yml` / `staticcheck` | same | `make workspace`, `make staticcheck` (v0.8.2, root and `config/yaml`) on `stable`; zero findings | `make staticcheck` |
 | `security.yml` / `govulncheck` | push and PR to main, weekly | known vulnerabilities in the root and `config/yaml` (pinned `govulncheck`) on `stable` | `go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...` |
-| `security.yml` / `zizmor` | same | workflow security audit (online in CI) | `zizmor --offline .github/workflows` |
+| `security.yml` / `zizmor` | same | workflow security audit (online in CI) | `zizmor --offline .github` |
 | `release-please.yml` | push to main | opens and updates the release pull request (`.release/`) | n/a |
 | `release-cascade.yml` / `cascade` | a published release, or `workflow_dispatch` with a `tag` (a rehearsal) | `cascade-yaml.sh`: records the core tag in `.release/versions.yaml` (`set-core-version.sh`), makes `config/yaml` require it and runs `go mod tidy` there (retried: the Go proxy lags a tag), then opens a pull request | `make test-scripts` (the script runs against a fake proxy, no network) |
 

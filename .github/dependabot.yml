@@ -8,6 +8,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # A new release waits a week before it is proposed, so a compromised one is
+    # more likely to have been found and pulled first. Security updates ignore it.
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "chore(deps)"
 
@@ -15,6 +19,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # A new release waits a week before it is proposed, so a compromised one is
+    # more likely to have been found and pulled first. Security updates ignore it.
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "chore(deps)"
 
@@ -25,6 +33,10 @@ updates:
     directory: /config/yaml
     schedule:
       interval: weekly
+    # A new release waits a week before it is proposed, so a compromised one is
+    # more likely to have been found and pulled first. Security updates ignore it.
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "chore(deps)"
     ignore:

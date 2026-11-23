@@ -55,7 +55,7 @@ lint-workflows:
 	python3 .github/scripts/check_workflows.py
 	go run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION) .github/workflows/*.yml
 	@# zizmor is installed separately (brew install zizmor); CI runs it too, online.
-	@if command -v zizmor >/dev/null 2>&1; then zizmor --offline --no-progress .github/workflows; else echo "zizmor is not installed: skipped (CI runs it)"; fi
+	@if command -v zizmor >/dev/null 2>&1; then zizmor --offline --no-progress .github; else echo "zizmor is not installed: skipped (CI runs it)"; fi
 
 # Every go.mod asks for the oldest Go the project supports: the release before the
 # current stable one (CI checks it, see .github/scripts/check_go_versions.py). When
