@@ -7,7 +7,7 @@
 
 release-please writes the changelog and picks the version from the commit messages, so
 each one must be `type(scope)!: subject`: a type and a scope from the lists below, a
-lowercase subject with no full stop, and a header of at most 72 characters. The title is
+lowercase subject (Dependabot's `chore(deps): Bump ...` is the one exception) with no full stop, and a header of at most 72 characters. The title is
 held to the same form in case the pull request is squashed. A merge commit is refused:
 rebase onto main instead.
 
@@ -92,7 +92,11 @@ def check_header(header: str) -> list[str]:
     elif subject != subject.strip():
         found.append("the header has a space at the start or end of the subject")
     else:
-        if subject[0].isupper():
+        # Dependabot writes "chore(deps): Bump ...", and that is the only place a capital is
+        # allowed: its prefix is set in .github/dependabot.yml and the rest is its own.
+        dependabot = match["type"] == "chore" and match["scope"] == "deps"
+
+        if subject[0].isupper() and not dependabot:
             found.append("the subject must start in lowercase")
 
         if subject.endswith("."):

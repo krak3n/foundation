@@ -56,6 +56,8 @@ class Headers(unittest.TestCase):
             "docs(examples): add example programs",
             "feat(yaml): add the provider",
             "chore(deps): bump go.yaml.in/yaml/v3 from 3.0.3 to 3.0.4",
+            "chore(deps): Bump actions/checkout from 4.4.0 to 7.0.1",
+            "chore(deps)!: Bump the only thing that is allowed a capital",
             "feat!: remove the old option",
             "feat(http)!: remove the old option",
             "fix: handle `nil` providers",
@@ -91,6 +93,10 @@ class Headers(unittest.TestCase):
             "feat((config)): add a thing": ("scope",),
             "feat(config: add a thing": ("header",),
             "feat: Add a thing": ("lowercase",),
+            "chore: Bump actions/checkout": ("lowercase",),
+            "chore(config): Bump actions/checkout": ("lowercase",),
+            "fix(deps): Bump actions/checkout": ("lowercase",),
+            "feat(deps): Bump actions/checkout": ("lowercase",),
             "feat: Éclair": ("lowercase",),
             "feat: add a thing.": ("full stop",),
             "feat: add a thing...": ("full stop",),
@@ -159,9 +165,12 @@ class Headers(unittest.TestCase):
                     for (j, j_ok) in subjects:
                         header = f"{t}{s}{b}: {j}"
 
+                        # Dependabot writes "chore(deps): Bump ...", so a capital is allowed there.
+                        capital_ok = j == "Add it" and t == "chore" and s == "(deps)"
+
                         with self.subTest(header):
                             got = cc.check_header(header) == []
-                            self.assertEqual(got, t_ok and s_ok and b_ok and j_ok)
+                            self.assertEqual(got, t_ok and s_ok and b_ok and (j_ok or capital_ok))
 
     def test_the_lists_are_what_the_docs_say(self):
         self.assertEqual(
@@ -296,6 +305,7 @@ class Hostile(unittest.TestCase):
             r"[^\sA-Z][^\n]*",
             re.ASCII | re.DOTALL,
         )
+        deps = re.compile(r"chore\(deps\)!?: [^\s][^\n]*", re.ASCII | re.DOTALL)
         rng = random.Random(11)
         pieces = ["feat", "fix", "chore", "(config)", "(deps)", "(x)", "!", ": ", ":", " ", "add", "Add", "it", ".", "日本", "\t", "‮"]
 
@@ -303,7 +313,8 @@ class Hostile(unittest.TestCase):
             header = "".join(rng.choice(pieces) for _ in range(rng.randint(1, 9)))
 
             if cc.check_header(header) == []:
-                self.assertTrue(form.fullmatch(header), repr(header))
+                # Only Dependabot's chore(deps) may start its subject with a capital.
+                self.assertTrue((deps if header.startswith("chore(deps)") else form).fullmatch(header), repr(header))
                 self.assertLessEqual(len(header), 72)
                 self.assertFalse(header.endswith("."))
                 self.assertTrue(header.isprintable())
