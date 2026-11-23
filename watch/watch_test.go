@@ -616,9 +616,17 @@ func TestALabelSurvivesAny(t *testing.T) {
 			t.Fatal("no event")
 		}
 
+		// Which of the two says so first is not fixed. A directory's reason has the name of
+		// the file (names are shown, made safe), and the file here is named with the canary,
+		// so what must hold is that no reason has the path of the directory, and that the
+		// name is only ever in the directory's reason, which is labelled.
 		for _, ev := range got {
-			if strings.Contains(ev.Reason, dir) || strings.Contains(ev.Reason, canaryDir) {
+			if strings.Contains(ev.Reason, dir) {
 				t.Errorf("the reason has the path in it: %q", ev.Reason)
+			}
+
+			if strings.Contains(ev.Reason, canaryDir) && !strings.HasPrefix(ev.Reason, "directory changed: $SVC_CONFIG_DIR (") {
+				t.Errorf("the reason has the path of the file in it: %q", ev.Reason)
 			}
 		}
 	})
