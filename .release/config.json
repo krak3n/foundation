@@ -14,14 +14,16 @@
       ],
       "exclude-paths": [
         "config/yaml"
-      ]
+      ],
+      "initial-version": "0.1.0"
     },
     "config/yaml": {
       "release-type": "go",
       "component": "config/yaml",
       "changelog-path": "CHANGELOG.md",
       "include-component-in-tag": true,
-      "tag-separator": "/"
+      "tag-separator": "/",
+      "initial-version": "0.1.0"
     }
   }
 }

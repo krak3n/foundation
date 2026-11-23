@@ -92,6 +92,13 @@ class Components(unittest.TestCase):
         # The parser can have an advisory that is fixed without a release of the core.
         self.assertIn("config/yaml", CONFIG["packages"]["."].get("exclude-paths", []))
 
+    def test_the_first_release_of_each_is_0_1_0(self):
+        # With no earlier tag release-please starts at initial-version, whose default is
+        # 1.0.0, whatever the manifest says. The first release of a pre-1.0 module is 0.1.0.
+        for path, package in CONFIG["packages"].items():
+            with self.subTest(path):
+                self.assertEqual(package.get("initial-version"), "0.1.0")
+
     def test_the_components_are_not_linked(self):
         for plugin in CONFIG.get("plugins", []):
             self.assertNotEqual(plugin.get("type"), "linked-versions", plugin)
