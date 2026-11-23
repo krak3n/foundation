@@ -39,7 +39,7 @@ These are repository settings, so they can't be checked in. Before the repositor
 - Enable **private vulnerability reporting**, Dependabot alerts and security updates, and secret
   scanning with push protection.
 - Protect `main`: require pull requests and the CI checks, and block force pushes. The checks to
-  require are the jobs of `ci.yml` (`test`, `tooling`, `go-version`, `staticcheck`) and of
+  require are the jobs of `ci.yml` (`test`, `tooling`, `go-version`, `staticcheck`, `commits`) and of
   `security.yml` (`govulncheck`, `zizmor`). `test` runs for each Go version in its matrix, so each of
   those is a check to require.
 - Add a tag ruleset limiting who can create `v*` and `telemetry/**/v*` tags.
