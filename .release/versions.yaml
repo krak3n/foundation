@@ -1,0 +1,10 @@
+module-sets:
+  core:
+    version: v0.0.0
+    modules:
+      - go.krak3n.dev/foundation
+  yaml:
+    version: v0.0.0
+    modules:
+      - go.krak3n.dev/foundation/config/yaml
+excluded-modules: []

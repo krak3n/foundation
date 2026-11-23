@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # A new Go release changes what the go lines must say, and what passes, without
+    # any change to the code, so this also runs weekly.
+    - cron: "41 5 * * 1"
+
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      # The current stable release and the one before it, which is the oldest the
+      # go lines promise (see the go-version job). One failing must not hide the other.
+      fail-fast: false
+      matrix:
+        go-version: [stable, oldstable]
+    env:
+      # What the go line asks for is what runs: a newer toolchain is never fetched in
+      # its place, which would make the older release a test of the newer.
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      # The modules other than the root are built in a workspace (see the Makefile).
+      - name: Create the workspace
+        run: make workspace
+
+      - name: Vet
+        run: make vet
+
+      - name: Test
+        run: make test
+
+  # The release tooling is code too: the script that writes a release tag into a
+  # file, and the checks that keep the workflows from regressing.
+  tooling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: stable
+
+      - name: Test the scripts
+        run: make test-scripts
+
+      - name: Lint the workflows
+        run: make lint-workflows
+
+  # Every go.mod asks for the release before the current stable one: the oldest that
+  # CI tests. It goes red when a new release ships, and `make go-version` is the fix.
+  go-version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: stable
+
+      - name: Check the go lines
+        run: GOVERSION="$(go env GOVERSION)" python3 .github/scripts/check_go_versions.py
+
+  # staticcheck is pinned in the Makefile, and needs a toolchain at least as new as
+  # the code it reads.
+  staticcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: stable
+
+      - name: Create the workspace
+        run: make workspace
+
+      - name: Staticcheck
+        run: make staticcheck

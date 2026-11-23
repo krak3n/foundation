@@ -1,0 +1,57 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # New advisories appear without any change to the code, so this also runs weekly.
+    - cron: "23 5 * * 1"
+
+permissions: {}
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: stable
+
+      - name: Create the workspace
+        run: make workspace
+
+      - name: Check for known vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+      # The YAML provider is the one module with a dependency, which is a parser of
+      # files that anyone who can write a config file controls.
+      - name: Check the YAML provider for known vulnerabilities
+        working-directory: config/yaml
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  # zizmor finds unpinned actions, template injection, excessive permissions and
+  # more in the workflows. Its output is read in the log: uploading it to code
+  # scanning needs GitHub Advanced Security.
+  zizmor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+        with:
+          advanced-security: false
