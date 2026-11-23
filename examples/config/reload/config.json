@@ -1,0 +1,8 @@
+{
+  "shop": {
+    "api": {
+      "greeting": "hello",
+      "workers": 2
+    }
+  }
+}
