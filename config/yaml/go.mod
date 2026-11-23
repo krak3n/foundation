@@ -1,0 +1,8 @@
+module go.krak3n.dev/foundation/config/yaml
+
+go 1.26
+
+require (
+	go.krak3n.dev/foundation v0.0.0
+	go.yaml.in/yaml/v3 v3.0.6
+)

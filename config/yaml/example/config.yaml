@@ -1,0 +1,16 @@
+# The section for the function that loads the config: the path is shop > api, so
+# these are the keys under shop.api.
+shop:
+  api:
+    addr: ":9090"
+    timeout: 45s
+    debug: true
+    hosts:
+      - example.com
+      - www.example.com
+    tls:
+      cert_file: /etc/ssl/cert.pem
+
+    # A value is read as the text it was written as, so these are not what YAML 1.1
+    # would make them: no is the string "no", not false. A bool is true or false.
+    region: no
