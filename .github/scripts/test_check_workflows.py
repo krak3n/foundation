@@ -364,6 +364,19 @@ class AppTokenInThisRepository(unittest.TestCase):
             self.assertRegex(text, r"(?m)^\s+token: \$\{\{ steps\.[A-Za-z0-9_-]+\.outputs\.token \}\}\s*$", name)
             self.assertNotIn("secrets.GITHUB_TOKEN", text, name + " should use the App's token")
 
+    def test_the_cascade_names_the_branch_it_opens_its_pull_request_against(self):
+        # A release starts the cascade on its tag, which is a detached commit, and
+        # create-pull-request refuses to guess a base then. A dispatch from main is a
+        # branch, so rehearsing by hand does not show it: the first real release did.
+        text = self.workflow("release-cascade.yml")
+
+        self.assertRegex(text, r"(?m)^\s+types: \[published\]", "the cascade should run on a release")
+
+        start = text.index("peter-evans/create-pull-request@")
+        step = text[start:]
+
+        self.assertRegex(step, r"(?m)^\s+base: main\s*$", "create-pull-request needs `base: main` on a tag checkout")
+
     def test_no_other_workflow_can_reach_the_key(self):
         for path in sorted((self.ROOT / ".github" / "workflows").glob("*.y*ml")):
             if path.name in ("release-please.yml", "release-cascade.yml"):
