@@ -52,7 +52,7 @@ These are repository settings, so they can't be checked in. Before the repositor
   contributors (Settings, Actions, General).
 - **The release App.** Make a GitHub App that can be installed only on your account, with no webhook
   and only Contents and Pull requests (read and write) and Metadata (read), and install it on this
-  repository alone. Keep its ID in the variable `RELEASE_APP_ID` and its private key in the secret
+  repository alone. Keep its Client ID (not a secret) in the variable `RELEASE_CLIENT_ID` and its private key in the secret
   `RELEASE_APP_PRIVATE_KEY` of an environment named `Release` (not a repository secret), and
   delete the downloaded key file. The key can write to the repository, so it must be rotated if it
   may have leaked, and the App must not be given administration, workflows or secrets access:
