@@ -44,7 +44,10 @@ These are repository settings, so they can't be checked in. Before the repositor
   require are the jobs of `ci.yml` (`test`, `tooling`, `go-version`, `staticcheck`, `commits`) and of
   `security.yml` (`govulncheck`, `zizmor`). `test` runs for each Go version in its matrix, so each of
   those is a check to require.
-- Add a tag ruleset limiting who can create `v*` and `telemetry/**/v*` tags.
+- Add a tag ruleset for **all tags** (not patterns, so a module added later is covered, and a
+  `*` that doesn't match `/` can't leave `config/yaml/v*` out) that restricts creation, updates and
+  deletion and blocks force pushes. Let the repository admin role and the release App bypass it:
+  release-please makes the tags with the App's token.
 - Set the default workflow token to read-only, and require approval for workflows from outside
   contributors (Settings, Actions, General).
 - **The release App.** Make a GitHub App that can be installed only on your account, with no webhook
