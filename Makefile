@@ -7,15 +7,14 @@ STATICCHECK_VERSION ?= v0.8.2
 # --- Development ---
 
 # Modules other than the root that have code and tests of their own. They require
-# the root module at a version that is not released yet, so they are built in a
-# workspace, which is not committed. "make workspace" makes it, with nothing to
-# install, and is what CI uses.
+# the root module at its last release, and are tested against the code in this
+# checkout, so they are built in a workspace, which is not committed. "make
+# workspace" makes it, with nothing to install, and is what CI uses.
 MODULES ?= config/yaml
 
 .PHONY: workspace
 workspace:
 	go work init . $(addprefix ./,$(MODULES))
-	go work edit -replace go.krak3n.dev/foundation@v0.0.0=.
 
 .PHONY: tidy
 tidy:
