@@ -230,6 +230,55 @@ class YamlRetraction(unittest.TestCase):
         self.assertNotEqual(core.group(1), "v0.0.0", "no such release of the core")
 
 
+class Tidy(unittest.TestCase):
+    """make tidy and make tidy-check look at the modules we release and nothing else:
+    a go.mod in an untracked directory (a local stub that needs an unreleased core) is not
+    ours to touch, and a local go.work must not change the answer."""
+
+    def recipe(self, target: str) -> str:
+        found = re.search(rf"(?ms)^{re.escape(target)}:[^\n]*\n(.*?)(?=^\S|\Z)", (REPO / "Makefile").read_text())
+
+        self.assertIsNotNone(found, f"no {target} target")
+
+        return found.group(1)
+
+    def test_tidy_goes_through_the_modules_we_release(self):
+        recipe = self.recipe("tidy")
+
+        self.assertNotIn("find ", recipe, "find walks into directories that are not ours")
+        self.assertIn("$(MODULES)", recipe)
+        self.assertIn("GOWORK=off", recipe)
+        self.assertIn("go mod tidy", recipe)
+
+    def test_tidy_check_only_reads(self):
+        recipe = self.recipe("tidy-check")
+
+        self.assertNotIn("find ", recipe)
+        self.assertIn("$(MODULES)", recipe)
+        self.assertIn("GOWORK=off", recipe)
+        self.assertRegex(recipe, r"go mod tidy -diff")
+        self.assertNotRegex(recipe, r"go mod tidy(?! -diff)", "a check must not change files")
+
+    def test_both_are_phony(self):
+        makefile = (REPO / "Makefile").read_text()
+
+        self.assertRegex(makefile, r"(?m)^\.PHONY: tidy$")
+        self.assertRegex(makefile, r"(?m)^\.PHONY: tidy-check$")
+
+    def test_ci_runs_the_check_in_the_tooling_job(self):
+        ci = (REPO / ".github" / "workflows" / "ci.yml").read_text()
+        job = re.search(r"(?ms)^  tooling:\n(.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)", ci)
+
+        self.assertIsNotNone(job)
+        self.assertRegex(job.group(1), r"(?m)^\s+run: make tidy-check\s*$")
+
+    def test_the_check_is_in_the_ci_table(self):
+        claude = (REPO / "CLAUDE.md").read_text()
+        row = next((l for l in claude.splitlines() if l.startswith("| `ci.yml` / `tooling`")), "")
+
+        self.assertIn("make tidy-check", row)
+
+
 class NoMultimod(unittest.TestCase):
     def test_the_makefile_has_no_targets_that_need_it(self):
         makefile = (REPO / "Makefile").read_text()
