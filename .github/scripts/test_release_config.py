@@ -191,6 +191,17 @@ class Cascade(unittest.TestCase):
         self.assertNotRegex(text, r"(?i)telemetry|otel")
 
 
+class Workspace(unittest.TestCase):
+    """The yaml module is tested against the code in this checkout, not a release."""
+
+    def test_the_workspace_does_not_pin_a_version_of_the_core(self):
+        makefile = (REPO / "Makefile").read_text()
+        recipe = re.search(r"(?ms)^workspace:\n(.*?)(?=^\S)", makefile)
+
+        self.assertIsNotNone(recipe)
+        self.assertNotRegex(recipe.group(1), r"@v\d", "the replace was for the unreleased core, v0.0.0")
+
+
 class NoMultimod(unittest.TestCase):
     def test_the_makefile_has_no_targets_that_need_it(self):
         makefile = (REPO / "Makefile").read_text()
