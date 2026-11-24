@@ -202,6 +202,34 @@ class Workspace(unittest.TestCase):
         self.assertNotRegex(recipe.group(1), r"@v\d", "the replace was for the unreleased core, v0.0.0")
 
 
+class YamlRetraction(unittest.TestCase):
+    """config/yaml/v0.1.0 was released before the cascade had run, so it requires a core
+    version that does not exist. The tag can't be removed (the Go proxy has it), so the next
+    version retracts it, and nothing else."""
+
+    def gomod(self) -> str:
+        return (REPO / "config" / "yaml" / "go.mod").read_text()
+
+    def test_v0_1_0_is_retracted_with_a_reason_and_nothing_else_is(self):
+        retracts = [l.strip() for l in self.gomod().splitlines() if re.match(r"\s*retract\b", l)]
+
+        self.assertEqual(len(retracts), 1, retracts)
+        self.assertRegex(retracts[0], r"^retract v0\.1\.0 // \S.{10,}$", "retract v0.1.0 and say why")
+
+    def test_the_reason_has_no_data_in_it(self):
+        # Tooling shows it to everyone who asks for the versions.
+        reason = re.search(r"(?m)^retract v0\.1\.0 // (.*)$", self.gomod())
+
+        self.assertIsNotNone(reason)
+        self.assertRegex(reason.group(1), r"^[A-Za-z0-9 .,;:()'-]+$")
+
+    def test_it_requires_a_core_that_exists(self):
+        core = re.search(r"(?m)^\s*go\.krak3n\.dev/foundation (v\S+)", self.gomod())
+
+        self.assertIsNotNone(core)
+        self.assertNotEqual(core.group(1), "v0.0.0", "no such release of the core")
+
+
 class NoMultimod(unittest.TestCase):
     def test_the_makefile_has_no_targets_that_need_it(self):
         makefile = (REPO / "Makefile").read_text()
