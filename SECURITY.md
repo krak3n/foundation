@@ -31,6 +31,8 @@ the library treats as trusted (see "Security" in CONFIG.md for what that means f
 - CI runs `govulncheck` on every change and weekly, and checks the workflows with `zizmor`.
 - Configuration problems are logged with control characters in names and messages escaped, so a hostile key or variable name cannot forge log lines. Values are never logged. A handler you write still decides how the rest of a log line is written.
 - Release workflows pin their actions to commit SHAs and never paste event data into scripts.
+- The release pull requests are made with a short lived token from a GitHub App (so that they run
+  CI), whose key is used by no other workflow: see "The release App" below.
 
 ## Maintainers: settings that are not in the repository
 
@@ -45,5 +47,14 @@ These are repository settings, so they can't be checked in. Before the repositor
 - Add a tag ruleset limiting who can create `v*` and `telemetry/**/v*` tags.
 - Set the default workflow token to read-only, and require approval for workflows from outside
   contributors (Settings, Actions, General).
+- **The release App.** Make a GitHub App that can be installed only on your account, with no webhook
+  and only Contents and Pull requests (read and write) and Metadata (read), and install it on this
+  repository alone. Keep its ID in the variable `RELEASE_APP_ID` and its private key in the secret
+  `RELEASE_APP_PRIVATE_KEY` of an environment named `Release` (not a repository secret), and
+  delete the downloaded key file. The key can write to the repository, so it must be rotated if it
+  may have leaked, and the App must not be given administration, workflows or secrets access:
+  `check_workflows.py` refuses a workflow that uses the key anywhere but the token step, in a
+  workflow a pull request can start, or in a job outside `Release`, or that asks for more than
+  those two permissions or more than this repository.
 - Consider CODEOWNERS for `.github/`, GitHub's immutable releases, and CodeQL (which needs the
   repository to be public, or GitHub Advanced Security).
