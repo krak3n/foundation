@@ -1,2 +1,4 @@
+go.krak3n.dev/foundation v0.1.0 h1:DWT391/M/Z17XaiQEYNhRYpvF+UbYodwDwwvobELpHM=
+go.krak3n.dev/foundation v0.1.0/go.mod h1:OOefvsGEzLuEryOcfG/IDguMDTBatfYjjS9HK59pb1o=
 go.yaml.in/yaml/v3 v3.0.6 h1:zcDfvjXEqTQmpjniUBLc91xYJMB2c4QOFxEF/LCEckM=
 go.yaml.in/yaml/v3 v3.0.6/go.mod h1:HVTZu1O7/Vkt2N+BFy8Zza+lnLsABggaTM2ZpNIGuKg=
