@@ -187,6 +187,18 @@ run "$work/r" v0.1.0 || fail "the second run failed: $(cat "$work/out")"
 tree "$work/r" >"$work/second"
 cmp -s "$work/first" "$work/second" || fail "running it twice changed things the second time"
 
+# --- A retraction in the yaml module's go.mod is kept ---
+
+rm -rf "$PROXY" "$work/r"
+repo "$work/r"
+printf '\nretract v0.0.1 // kept by the cascade\n' >>"$work/r/config/yaml/go.mod"
+stage "$PROXY" v0.1.0
+
+run "$work/r" v0.1.0 || fail "a go.mod with a retraction was refused or failed: $(cat "$work/out")"
+
+grep -q '^retract v0.0.1 // kept by the cascade$' "$work/r/config/yaml/go.mod" || fail "the retraction did not survive: $(cat "$work/r/config/yaml/go.mod")"
+[ "$(required "$work/r")" = "v0.1.0" ] || fail "with a retraction, config/yaml requires $(required "$work/r")"
+
 # --- A tag that is not a plain version is refused before anything changes ---
 
 hostile=(
