@@ -65,8 +65,9 @@ make lint-workflows
 # make test and make vet then cover those modules too. CI runs this first.
 make workspace
 
-# Tidy all go.mod files across all modules
+# Tidy go.mod and go.sum of the root and $(MODULES) (not any other go.mod on disk), and check that they are tidy (CI does)
 make tidy
+make tidy-check
 ```
 
 ### Tools
@@ -80,7 +81,7 @@ Each is checked locally with the command shown, and runs on GitHub for every pul
 | Workflow / job | Runs on | What it does | Locally |
 |---|---|---|---|
 | `ci.yml` / `test` | push and PR to main, weekly | `make workspace`, `make vet`, `make test` (race detector) on Go `stable` and `oldstable`, `GOTOOLCHAIN=local`, `fail-fast: false` | `make test`, `make vet` |
-| `ci.yml` / `tooling` | same | `make test-scripts` (the release script's tests and the Python tests of the CI scripts) and `make lint-workflows` (`check_workflows.py`, actionlint, zizmor) on `stable` | `make test-scripts`, `make lint-workflows` |
+| `ci.yml` / `tooling` | same | `make test-scripts` (the release script's tests and the Python tests of the CI scripts) and `make lint-workflows` (`check_workflows.py`, actionlint, zizmor) and `make tidy-check` (`go mod tidy -diff` in the root and `config/yaml`: nothing is written) on `stable` | `make test-scripts`, `make lint-workflows`, `make tidy-check` |
 | `ci.yml` / `go-version` | same | every `go.mod` says the release before the current stable (`check_go_versions.py`); red when Go ships | `GOVERSION=$(go env GOVERSION) python3 .github/scripts/check_go_versions.py` |
 | `ci.yml` / `staticcheck` | same | `make workspace`, `make staticcheck` (v0.8.2, root and `config/yaml`) on `stable`; zero findings | `make staticcheck` |
 | `ci.yml` / `commits` | pull requests only | `check_commits.py`: every commit since `main` and the title are conventional commits (types, scopes, lowercase subject, 72 characters, no merge commits); the text reaches it only through the environment (`BASE`, `HEAD`, `PR_TITLE`) and is never repeated in what it says | `make check-commits` |

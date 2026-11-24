@@ -66,6 +66,9 @@ jobs:
       - name: Test the scripts
         run: make test-scripts
 
+      - name: Check that go.mod and go.sum are tidy
+        run: make tidy-check
+
       - name: Lint the workflows
         run: make lint-workflows
 

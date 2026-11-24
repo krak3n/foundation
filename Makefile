@@ -16,11 +16,22 @@ MODULES ?= config/yaml
 workspace:
 	go work init . $(addprefix ./,$(MODULES))
 
+# The modules we release, and no other go.mod that happens to be on disk (a local stub
+# needs a core that is not released). GOWORK=off so that a local go.work, which is not
+# committed, cannot change the answer.
 .PHONY: tidy
 tidy:
-	@set -e; for dir in $$(find . -name 'go.mod' -exec dirname {} \;); do \
+	@set -e; for dir in . $(MODULES); do \
 		echo "go mod tidy: $${dir}"; \
-		(cd "$${dir}" && go mod tidy); \
+		(cd "$${dir}" && GOWORK=off go mod tidy); \
+	done
+
+# Fails, and changes nothing, when a go.mod or go.sum is not what tidy would write.
+.PHONY: tidy-check
+tidy-check:
+	@set -e; for dir in . $(MODULES); do \
+		echo "go mod tidy -diff: $${dir}"; \
+		(cd "$${dir}" && GOWORK=off go mod tidy -diff); \
 	done
 
 .PHONY: vet
