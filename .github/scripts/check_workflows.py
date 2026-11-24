@@ -192,7 +192,10 @@ def check_app(lines: list[str], problem) -> None:
             if re.fullmatch(pattern, inputs.get(input_name, "")) is None:
                 problem(i + 1, f"`{input_name}` of the token step {why}")
 
-        expect("app-id", r"\$\{\{\s*vars\.RELEASE_APP_ID\s*\}\}", "must be `${{ vars.RELEASE_APP_ID }}`")
+        expect("client-id", r"\$\{\{\s*vars\.RELEASE_CLIENT_ID\s*\}\}", "must be `${{ vars.RELEASE_CLIENT_ID }}`")
+
+        if "app-id" in inputs:
+            problem(i + 1, "`app-id` is deprecated in favour of `client-id`, and a leftover would hide a missing one; remove it")
         expect("private-key", rf"\$\{{\{{\s*secrets\.{KEY}\s*\}}\}}", f"must be `${{{{ secrets.{KEY} }}}}`")
         expect("owner", r"\S.*", "must be set")
         expect("repositories", r"[A-Za-z0-9._-]+", "must be one repository, written out")

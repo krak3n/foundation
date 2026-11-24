@@ -166,7 +166,7 @@ jobs:
       - id: app
         uses: actions/create-github-app-token@{SHA} # v2.0.0
         with:
-          app-id: ${{{{ vars.RELEASE_APP_ID }}}}
+          client-id: ${{{{ vars.RELEASE_CLIENT_ID }}}}
           private-key: ${{{{ secrets.RELEASE_APP_PRIVATE_KEY }}}}
           owner: ${{{{ github.repository_owner }}}}
           repositories: foundation
@@ -318,15 +318,43 @@ class AppToken(unittest.TestCase):
         text = APP.replace("          repositories: foundation\n", "          repositories: foundation\n          skip-token-revoke: true\n")
         self.assertTrue(has(problems(text), "skip-token-revoke"))
 
-    def test_the_app_id_is_a_variable_and_the_key_comes_from_secrets(self):
+    def test_the_client_id_is_a_variable_and_the_key_comes_from_secrets(self):
+        good = "          client-id: ${{ vars.RELEASE_CLIENT_ID }}\n"
+
         for line in [
+            "          client-id: Iv23liAbCdEfGhIjKlMn\n",
+            "          client-id: ${{ secrets.RELEASE_CLIENT_ID }}\n",
+            "          client-id: ${{ vars.SOMETHING_ELSE }}\n",
+            "          client-id: ${{ vars.RELEASE_APP_ID }}\n",
+            "          client-id: ${{ vars.RELEASE_CLIENT_ID }}${{ vars.X }}\n",
+            "          client-id:\n",
+            "",
+        ]:
+            text = APP.replace(good, line)
+            self.assertTrue(has(problems(text), "client-id"), repr(line))
+
+    def test_the_deprecated_app_id_is_refused_even_beside_a_client_id(self):
+        for line in [
+            "          app-id: ${{ vars.RELEASE_APP_ID }}\n",
             "          app-id: 123456\n",
             "          app-id: ${{ secrets.RELEASE_APP_ID }}\n",
-            "          app-id: ${{ vars.SOMETHING_ELSE }}\n",
         ]:
-            text = APP.replace("          app-id: ${{ vars.RELEASE_APP_ID }}\n", line)
-            self.assertTrue(has(problems(text), "app-id"), line)
+            text = APP.replace(
+                "          client-id: ${{ vars.RELEASE_CLIENT_ID }}\n",
+                "          client-id: ${{ vars.RELEASE_CLIENT_ID }}\n" + line,
+            )
+            self.assertTrue(has(problems(text), "app-id", "deprecated"), repr(line))
 
+            only = APP.replace("          client-id: ${{ vars.RELEASE_CLIENT_ID }}\n", line)
+            self.assertTrue(has(problems(only), "app-id"), repr(line))
+            self.assertTrue(has(problems(only), "client-id"), repr(line))
+
+    def test_a_client_id_given_twice_is_refused(self):
+        good = "          client-id: ${{ vars.RELEASE_CLIENT_ID }}\n"
+
+        self.assertTrue(has(problems(APP.replace(good, good + good)), "client-id", "twice"))
+
+    def test_the_key_input_is_checked_like_before(self):
         for line in ["          private-key: |\n            -----BEGIN RSA PRIVATE KEY-----\n", "          private-key: abc\n"]:
             text = APP.replace("          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}\n", line)
             self.assertTrue(has(problems(text), "private-key"), line)
@@ -376,6 +404,21 @@ class AppTokenInThisRepository(unittest.TestCase):
         step = text[start:]
 
         self.assertRegex(step, r"(?m)^\s+base: main\s*$", "create-pull-request needs `base: main` on a tag checkout")
+
+    def test_the_release_workflows_use_the_client_id_not_the_deprecated_app_id(self):
+        for name in ["release-please.yml", "release-cascade.yml"]:
+            text = self.workflow(name)
+
+            self.assertIn("client-id: ${{ vars.RELEASE_CLIENT_ID }}", text, name)
+            self.assertNotRegex(text, r"(?m)^\s+app-id:", name)
+            self.assertNotIn("RELEASE_APP_ID", text, name)
+
+    def test_the_documents_name_the_client_id_variable(self):
+        for name in ["CLAUDE.md", "SECURITY.md"]:
+            text = (self.ROOT / name).read_text()
+
+            self.assertIn("RELEASE_CLIENT_ID", text, name)
+            self.assertNotIn("RELEASE_APP_ID", text, name)
 
     def test_no_other_workflow_can_reach_the_key(self):
         for path in sorted((self.ROOT / ".github" / "workflows").glob("*.y*ml")):
