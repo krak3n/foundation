@@ -4,10 +4,12 @@
     GOVERSION=$(go env GOVERSION) python3 .github/scripts/check_go_versions.py [--root DIR]
 
 The `go` line of a module is the least version that can build it. The project supports
-the current stable release and the one before it, so the line is the one before: lower
-promises a version CI doesn't test, and higher stops the older release building the
-module at all (a toolchain would be downloaded in its place, so a test of the older
-release would be a test of the newer one).
+the current stable release and the one before it, so the line is the first release of the
+one before (`go 1.26.0`, the form `go mod init` writes, so a dependency that says `1.26.0`
+never moves it): lower promises a version CI doesn't test, and higher stops the older
+release building the module at all (a toolchain would be downloaded in its place, so a
+test of the older release would be a test of the newer one). The bare minor (`go 1.26`)
+sorts before `1.26.0` and is refused, so there is one form.
 
 The current stable release comes from the environment (`GOVERSION`, as `go env GOVERSION`
 prints it), so nothing is fetched and nothing needs editing when Go ships: the check
@@ -82,7 +84,7 @@ def check_text(text: str, name: str, want: str) -> list[str]:
         found.append(f"{name}:1: starts with a byte order mark")
         text = text[1:]
 
-    accepted = re.compile(re.escape(want) + r"(\.0)?", re.ASCII)
+    accepted = re.compile(re.escape(want) + r"\.0", re.ASCII)
 
     directives = 0
     in_block = False
@@ -119,7 +121,7 @@ def check_text(text: str, name: str, want: str) -> list[str]:
                 found.append(f"{name}:{number}: go directive given more than once")
             elif len(words) != 2 or not accepted.fullmatch(words[1]):
                 got = words[1] if len(words) == 2 else code
-                found.append(f"{name}:{number}: go directive is {shown(got)}, want {want}")
+                found.append(f"{name}:{number}: go directive is {shown(got)}, want {want}.0")
 
     if directives == 0:
         found.append(f"{name}: no go directive")
@@ -220,11 +222,11 @@ def main(argv: list[str], env: dict[str, str]) -> int:
 
     if found:
         print("\n".join(found), file=sys.stderr)
-        print(f"every go.mod must say go {want}, the release before the current stable: make go-version GO={want}", file=sys.stderr)
+        print(f"every go.mod must say go {want}.0, the release before the current stable: make go-version GO={want}", file=sys.stderr)
 
         return 1
 
-    print(f"{len(modules)} modules, all at go {want}")
+    print(f"{len(modules)} modules, all at go {want}.0")
 
     return 0
 
