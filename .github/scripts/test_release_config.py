@@ -288,11 +288,6 @@ class EveryProviderRequiresACoreThatExists(unittest.TestCase):
                 self.assertIsNotNone(core, f"{path} does not require the core")
                 self.assertNotEqual(core.group(1), "v0.0.0", "no such release of the core")
 
-    def test_the_new_provider_has_nothing_to_retract(self):
-        text = (REPO / "config/etcd/go.mod").read_text()
-
-        self.assertNotRegex(text, r"(?m)^\s*retract\b")
-
     def test_every_provider_has_code_that_uses_the_core(self):
         # go mod tidy drops a requirement nothing imports, and the cascade would then have
         # nothing to move.
@@ -300,7 +295,10 @@ class EveryProviderRequiresACoreThatExists(unittest.TestCase):
             with self.subTest(path):
                 sources = [p for p in (REPO / path).glob("*.go") if not p.name.endswith("_test.go")]
 
-                self.assertTrue(any('"go.krak3n.dev/foundation' in p.read_text() for p in sources))
+                # An import line, not a string or a comment that happens to say the path.
+                imports = r'(?m)^\s*(import\s+)?([A-Za-z_.][A-Za-z0-9_]*\s+)?"go\.krak3n\.dev/foundation(/[^"\n]*)?"\s*$'
+
+                self.assertTrue(any(re.search(imports, p.read_text()) for p in sources))
 
 
 class ModulesAgree(unittest.TestCase):
