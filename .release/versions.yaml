@@ -7,4 +7,8 @@ module-sets:
     version: v0.0.0
     modules:
       - go.krak3n.dev/foundation/config/yaml
+  etcd:
+    version: v0.0.0
+    modules:
+      - go.krak3n.dev/foundation/config/etcd
 excluded-modules: []

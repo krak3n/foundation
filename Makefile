@@ -10,7 +10,7 @@ STATICCHECK_VERSION ?= v0.8.2
 # the root module at its last release, and are tested against the code in this
 # checkout, so they are built in a workspace, which is not committed. "make
 # workspace" makes it, with nothing to install, and is what CI uses.
-MODULES ?= config/yaml
+MODULES ?= config/yaml config/etcd
 
 .PHONY: workspace
 workspace:
@@ -52,12 +52,12 @@ test:
 	@set -e; for dir in $(MODULES); do echo "go test: $${dir}"; (cd "$${dir}" && go test -race -count=1 -timeout 120s ./...); done
 
 # The release tooling: the scripts that write a release tag into versions.yaml and move
-# the yaml module to it, the checkers that keep the workflows and the release files from
+# the provider modules to it, the checkers that keep the workflows and the release files from
 # regressing, and the version check (see .github/scripts).
 .PHONY: test-scripts
 test-scripts:
 	bash .github/scripts/test-set-core-version.sh
-	bash .github/scripts/test-cascade-yaml.sh
+	bash .github/scripts/test-cascade.sh
 	python3 -m unittest discover -s .github/scripts
 
 # Every commit of this branch since it left main must be a conventional commit (CI runs

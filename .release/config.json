@@ -13,13 +13,22 @@
         "version.go"
       ],
       "exclude-paths": [
-        "config/yaml"
+        "config/yaml",
+        "config/etcd"
       ],
       "initial-version": "0.1.0"
     },
     "config/yaml": {
       "release-type": "go",
       "component": "config/yaml",
+      "changelog-path": "CHANGELOG.md",
+      "include-component-in-tag": true,
+      "tag-separator": "/",
+      "initial-version": "0.1.0"
+    },
+    "config/etcd": {
+      "release-type": "go",
+      "component": "config/etcd",
       "changelog-path": "CHANGELOG.md",
       "include-component-in-tag": true,
       "tag-separator": "/",

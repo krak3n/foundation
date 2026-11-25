@@ -29,7 +29,7 @@ import threading
 import unicodedata
 
 TYPES = ("feat", "fix", "docs", "test", "refactor", "perf", "ci", "build", "chore", "revert", "style")
-SCOPES = ("internal", "config", "watch", "interrupt", "http", "yaml", "examples", "deps")
+SCOPES = ("internal", "config", "watch", "interrupt", "http", "yaml", "etcd", "examples", "deps")
 
 # Bounds, so that a hostile history can't make the check run long or use much memory.
 MAX_HEADER = 72

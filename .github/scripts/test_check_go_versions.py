@@ -555,10 +555,10 @@ class RealRepository(unittest.TestCase):
     def test_the_repository_has_the_modules_it_should(self):
         names = [str(p.relative_to(REPO)) for p in cg.find_modules(REPO)]
 
-        for want in ["go.mod", "config/yaml/go.mod"]:
+        for want in ["go.mod", "config/yaml/go.mod", "config/etcd/go.mod"]:
             self.assertIn(want, names)
 
-        self.assertGreaterEqual(len(names), 2)
+        self.assertGreaterEqual(len(names), 3)
 
     def test_every_module_follows_oldstable_when_stable_is_the_version_after_it(self):
         # The line the repository promises is 1.26.0: CI passes the real stable
