@@ -41,3 +41,19 @@ updates:
       prefix: "chore(deps)"
     ignore:
       - dependency-name: go.krak3n.dev/foundation
+
+  # The etcd provider is a module of its own too, for the same reason: the client and
+  # its dependencies (gRPC, protobuf) can have an advisory that is fixed without a
+  # release of the core. Its requirement on the core is moved by the release cascade.
+  - package-ecosystem: gomod
+    directory: /config/etcd
+    schedule:
+      interval: weekly
+    # A new release waits a week before it is proposed, so a compromised one is
+    # more likely to have been found and pulled first. Security updates ignore it.
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(deps)"
+    ignore:
+      - dependency-name: go.krak3n.dev/foundation

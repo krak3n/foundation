@@ -32,10 +32,14 @@ jobs:
       - name: Check for known vulnerabilities
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
-      # The YAML provider is the one module with a dependency, which is a parser of
-      # files that anyone who can write a config file controls.
+      # The providers are the modules with dependencies: a parser of files that anyone
+      # who can write a config file controls, and a client of a cluster over the network.
       - name: Check the YAML provider for known vulnerabilities
         working-directory: config/yaml
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+      - name: Check the etcd provider for known vulnerabilities
+        working-directory: config/etcd
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
   # zizmor finds unpinned actions, template injection, excessive permissions and

@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
-# Tests for cascade-yaml.sh. Run: bash .github/scripts/test-cascade-yaml.sh
+# Tests for cascade.sh. Run: bash .github/scripts/test-cascade.sh
 #
-# After a core release the yaml module has to require the new core version. The script
-# does it with go mod edit and go mod tidy, in a repository checkout, on a tag that is
-# chosen by whoever creates the release, so the tests are about three things: it does
-# exactly that and nothing else, it refuses a tag that isn't a plain version before it
-# touches anything (the tag would otherwise reach go mod edit as an option), and it is
-# bounded when the Go proxy has not got the tag yet (it takes a few seconds after a tag
-# is pushed). The proxy is a directory of files, so nothing here uses the network.
+# After a core release the modules that depend on it (config/yaml, config/etcd, the ones
+# the MODULES variable lists) have to require the new core version. The script does it
+# with go mod edit and go mod tidy, in a repository checkout, on a tag that is chosen by
+# whoever creates the release, so the tests are about four things: it does exactly that
+# to the modules it is given and nothing else, all or nothing (a module that can't be
+# tidied leaves every other one as it was), it refuses a tag or a module list that isn't
+# plain before it touches anything (either would otherwise reach go mod edit or a path),
+# and it is bounded when the Go proxy has not got the tag yet (it takes a few seconds
+# after a tag is pushed). The proxy is a directory of files, so nothing here uses the
+# network.
 set -uo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-script="${CASCADE_SCRIPT:-$here/cascade-yaml.sh}"
+script="${CASCADE_SCRIPT:-$here/cascade.sh}"
 real_go="$(command -v go)"
 
 work="$(mktemp -d)"
@@ -19,18 +22,25 @@ trap 'chmod -R u+w "$work" 2>/dev/null; rm -rf "$work"' EXIT
 
 failures=0
 
+# Every "should refuse" below would pass for a script that is not there.
+[ -f "$script" ] || {
+	echo "FAIL: $script does not exist" >&2
+
+	exit 1
+}
+
 fail() {
 	echo "FAIL: $*" >&2
 	failures=$((failures + 1))
 }
 
 # repo DIR makes the checkout the script runs in: the core module at its root, the
-# yaml module in config/yaml (which needs a core that can't be fetched yet), and the
-# versions file.
+# yaml and etcd modules in config/ (which need a core that can't be fetched yet), a
+# module the script is not given (tools), and the versions file.
 repo() {
 	local dir="$1"
 
-	mkdir -p "$dir/.release" "$dir/config/yaml"
+	mkdir -p "$dir/.release" "$dir/config/yaml" "$dir/config/etcd" "$dir/tools"
 
 	cat >"$dir/.release/versions.yaml" <<YAML
 module-sets:
@@ -42,6 +52,10 @@ module-sets:
     version: v0.0.0
     modules:
       - go.krak3n.dev/foundation/config/yaml
+  etcd:
+    version: v0.0.0
+    modules:
+      - go.krak3n.dev/foundation/config/etcd
 excluded-modules: []
 YAML
 
@@ -57,6 +71,35 @@ MOD
 
 	cat >"$dir/config/yaml/yaml.go" <<'GO'
 package yaml
+
+import _ "go.krak3n.dev/foundation/config"
+GO
+
+	cat >"$dir/config/etcd/go.mod" <<'MOD'
+module go.krak3n.dev/foundation/config/etcd
+
+go 1.26
+
+require go.krak3n.dev/foundation v0.0.0
+MOD
+
+	cat >"$dir/config/etcd/etcd.go" <<'GO'
+package etcd
+
+import _ "go.krak3n.dev/foundation/config"
+GO
+
+	# Not a module the cascade is told about: it must come out as it went in.
+	cat >"$dir/tools/go.mod" <<'MOD'
+module example.com/tools
+
+go 1.26
+
+require go.krak3n.dev/foundation v0.0.0
+MOD
+
+	cat >"$dir/tools/tools.go" <<'GO'
+package tools
 
 import _ "go.krak3n.dev/foundation/config"
 GO
@@ -121,15 +164,16 @@ run() {
 
 	(
 		cd "$dir" && env \
-			TAG="$tag" \
+			TAG="$tag" MODULES="config/yaml config/etcd" \
 			GOPROXY="file://$PROXY" GOSUMDB=off GOWORK=off GOTOOLCHAIN=local GOFLAGS=-modcacherw \
 			GOMODCACHE="$work/modcache" \
 			"$@" bash "$script"
 	) >"$work/out" 2>&1
 }
 
+# required DIR [MODULE] prints the core version that MODULE (config/yaml by default) requires.
 required() {
-	awk '$1 == "go.krak3n.dev/foundation" { print $2 }' <(sed -n 's/^require //p;s/^\t//p' "$1/config/yaml/go.mod") | head -1
+	awk '$1 == "go.krak3n.dev/foundation" { print $2 }' <(sed -n 's/^require //p;s/^\t//p' "$1/${2:-config/yaml}/go.mod") | head -1
 }
 
 version_of() {
@@ -141,7 +185,7 @@ version_of() {
 
 PROXY="$work/proxy"
 
-# --- A plain version: the yaml module requires the new core, and only that changes ---
+# --- A plain version: every module in the list requires the new core, and only that changes ---
 
 for tag in v0.1.0 v1.2.3 v0.1.0-rc.1 v1.20.30; do
 	rm -rf "$PROXY" "$work/r"
@@ -157,20 +201,31 @@ for tag in v0.1.0 v1.2.3 v0.1.0-rc.1 v1.20.30; do
 	fi
 
 	[ "$(required "$work/r")" = "$tag" ] || fail "$tag: config/yaml requires $(required "$work/r")"
+	[ "$(required "$work/r" config/etcd)" = "$tag" ] || fail "$tag: config/etcd requires $(required "$work/r" config/etcd)"
 	[ "$(version_of "$work/r" core)" = "$tag" ] || fail "$tag: the core set is at $(version_of "$work/r" core)"
 	[ "$(version_of "$work/r" yaml)" = "v0.0.0" ] || fail "$tag: the yaml set was changed to $(version_of "$work/r" yaml)"
+	[ "$(version_of "$work/r" etcd)" = "v0.0.0" ] || fail "$tag: the etcd set was changed to $(version_of "$work/r" etcd)"
 	[ -s "$work/r/config/yaml/go.sum" ] || fail "$tag: config/yaml/go.sum has nothing in it"
+	[ -s "$work/r/config/etcd/go.sum" ] || fail "$tag: config/etcd/go.sum has nothing in it"
+
+	# A module that is not in the list is left alone, though it requires the core too.
+	[ "$(required "$work/r" tools)" = "v0.0.0" ] || fail "$tag: tools was moved to $(required "$work/r" tools)"
+	cmp -s "$work/r/tools/go.mod" "$work/before/tools/go.mod" || fail "$tag: tools/go.mod changed"
+	[ ! -e "$work/r/tools/go.sum" ] || fail "$tag: tools/go.sum was written"
 
 	# Nothing else changed: not the core's go.mod, not the code, nothing new.
 	cmp -s "$work/r/go.mod" "$work/before/go.mod" || fail "$tag: the core go.mod changed"
 	cmp -s "$work/r/config/yaml/yaml.go" "$work/before/config/yaml/yaml.go" || fail "$tag: yaml.go changed"
+	cmp -s "$work/r/config/etcd/etcd.go" "$work/before/config/etcd/etcd.go" || fail "$tag: etcd.go changed"
 
-	extra="$(diff -rq "$work/before" "$work/r" | grep -v 'versions.yaml\|config/yaml/go.mod\|go.sum' || true)"
+	extra="$(diff -rq "$work/before" "$work/r" | grep -v 'versions.yaml\|config/yaml/go.mod\|config/etcd/go.mod\|go.sum' || true)"
 	[ -z "$extra" ] || fail "$tag: other files changed: $extra"
 
 	# It leaves a module that builds.
-	(cd "$work/r/config/yaml" && env GOPROXY="file://$PROXY" GOSUMDB=off GOWORK=off GOTOOLCHAIN=local GOFLAGS=-modcacherw GOMODCACHE="$work/modcache" "$real_go" build ./... >/dev/null 2>&1) ||
-		fail "$tag: the yaml module does not build against it"
+	for module in config/yaml config/etcd; do
+		(cd "$work/r/$module" && env GOPROXY="file://$PROXY" GOSUMDB=off GOWORK=off GOTOOLCHAIN=local GOFLAGS=-modcacherw GOMODCACHE="$work/modcache" "$real_go" build ./... >/dev/null 2>&1) ||
+			fail "$tag: $module does not build against it"
+	done
 
 	rm -rf "$work/before"
 done
@@ -187,17 +242,47 @@ run "$work/r" v0.1.0 || fail "the second run failed: $(cat "$work/out")"
 tree "$work/r" >"$work/second"
 cmp -s "$work/first" "$work/second" || fail "running it twice changed things the second time"
 
-# --- A retraction in the yaml module's go.mod is kept ---
+# --- A retraction in a module's go.mod is kept ---
 
 rm -rf "$PROXY" "$work/r"
 repo "$work/r"
 printf '\nretract v0.0.1 // kept by the cascade\n' >>"$work/r/config/yaml/go.mod"
+printf '\nretract v0.0.2 // kept by the cascade\n' >>"$work/r/config/etcd/go.mod"
 stage "$PROXY" v0.1.0
 
 run "$work/r" v0.1.0 || fail "a go.mod with a retraction was refused or failed: $(cat "$work/out")"
 
 grep -q '^retract v0.0.1 // kept by the cascade$' "$work/r/config/yaml/go.mod" || fail "the retraction did not survive: $(cat "$work/r/config/yaml/go.mod")"
+grep -q '^retract v0.0.2 // kept by the cascade$' "$work/r/config/etcd/go.mod" || fail "the retraction did not survive: $(cat "$work/r/config/etcd/go.mod")"
 [ "$(required "$work/r")" = "v0.1.0" ] || fail "with a retraction, config/yaml requires $(required "$work/r")"
+
+# --- Only the modules it is given are moved ---
+
+rm -rf "$PROXY" "$work/r"
+repo "$work/r"
+stage "$PROXY" v0.1.0
+
+run "$work/r" v0.1.0 MODULES="config/etcd" || fail "one module was refused or failed: $(cat "$work/out")"
+
+[ "$(required "$work/r" config/etcd)" = "v0.1.0" ] || fail "config/etcd requires $(required "$work/r" config/etcd)"
+[ "$(required "$work/r")" = "v0.0.0" ] || fail "config/yaml was moved although it was not listed: $(required "$work/r")"
+
+# --- All or nothing: a module that can't be tidied puts every module back ---
+
+rm -rf "$PROXY" "$work/r"
+repo "$work/r"
+stage "$PROXY" v0.1.0
+
+# The second module needs a module that no proxy has, after the first has been moved.
+printf '\nrequire example.com/missing v1.0.0\n' >>"$work/r/config/etcd/go.mod"
+printf 'package etcd\n\nimport (\n\t_ "example.com/missing"\n\t_ "go.krak3n.dev/foundation/config"\n)\n' >"$work/r/config/etcd/etcd.go"
+tree "$work/r" >"$work/before"
+
+run "$work/r" v0.1.0 CASCADE_RETRIES=1 CASCADE_WAIT=0 && fail "should fail when one module can't be tidied"
+
+tree "$work/r" >"$work/after"
+cmp -s "$work/before" "$work/after" || fail "a failure in the second module left the first moved, or something else changed"
+[ ! -e "$work/r/config/yaml/go.sum" ] || fail "config/yaml/go.sum was left behind"
 
 # --- A tag that is not a plain version is refused before anything changes ---
 
@@ -257,6 +342,88 @@ for tag in "${hostile[@]}"; do
 	[ "$(wc -c <"$work/out")" -lt 600 ] || fail "$(printf %q "${tag:0:40}"): a reason of $(wc -c <"$work/out") bytes"
 done
 
+# --- A module list that is not plain is refused before anything changes ---
+
+modules_hostile=(
+	''
+	' '
+	'.'
+	'./'
+	'..'
+	'../x'
+	'../../etc'
+	'/etc'
+	'/abs/path'
+	'config/yaml/'
+	'config//yaml'
+	'config/./yaml'
+	'config/../config/yaml'
+	'./config/yaml'
+	'-x'
+	'--help'
+	'config/yaml -x'
+	'config/yaml;touch PWNED'
+	'config/yaml$(touch PWNED)'
+	'config/yaml`touch PWNED`'
+	'config/yaml"'
+	"config/yaml'"
+	'config/yaml|id'
+	'config/yaml&id'
+	'config/yaml>PWNED'
+	'config/yaml*'
+	'config/*'
+	'config/yaml?'
+	'~'
+	$'config/yaml\nconfig/etcd'
+	$'config/yaml\tconfig/etcd'
+	$'config/yaml\r'
+	'config/yaml  config/etcd'
+	' config/yaml'
+	'config/yaml '
+	'config/yaml config/yaml'
+	'config/yaml config/etcd config/yaml'
+	'config'
+	'nope/missing'
+	'Config/Yaml'
+	'config/é'
+	'link'
+	'link/etcd'
+	'.release'
+	"$(printf 'a%0300d' 0)"
+	"$(printf 'm%d ' $(seq 1 17))"
+)
+
+for list in "${modules_hostile[@]}"; do
+	rm -rf "$PROXY" "$work/r" PWNED
+	repo "$work/r"
+	ln -s config/yaml "$work/r/link"
+	stage "$PROXY" v0.1.0
+	tree "$work/r" >"$work/before"
+
+	if run "$work/r" v0.1.0 CASCADE_WAIT=0 MODULES="$list"; then
+		fail "should refuse the modules $(printf %q "${list:0:40}")"
+	fi
+
+	tree "$work/r" >"$work/after"
+	cmp -s "$work/before" "$work/after" || fail "$(printf %q "${list:0:40}"): files changed although the list was refused"
+
+	[ ! -e "$work/r/PWNED" ] && [ ! -e PWNED ] || fail "$(printf %q "${list:0:40}"): it ran what was in the list"
+
+	[ "$(wc -c <"$work/out")" -lt 600 ] || fail "$(printf %q "${list:0:40}"): a reason of $(wc -c <"$work/out") bytes"
+
+	# It was the script that refused, not something else failing: it says so.
+	grep -q '^refusing' "$work/out" || fail "$(printf %q "${list:0:40}"): no refusal in the output: $(head -c 200 "$work/out")"
+done
+
+# No list at all.
+rm -rf "$PROXY" "$work/r"
+repo "$work/r"
+stage "$PROXY" v0.1.0
+
+if (cd "$work/r" && env -u MODULES TAG=v0.1.0 GOPROXY="file://$PROXY" GOSUMDB=off GOWORK=off bash "$script" >/dev/null 2>&1); then
+	fail "should refuse when MODULES is not set"
+fi
+
 # No tag at all.
 rm -rf "$PROXY" "$work/r"
 repo "$work/r"
@@ -279,7 +446,7 @@ lag() {
 	mkdir -p "$PROXY"
 	tree "$work/r" >"$work/before"
 
-	run "$work/r" "$tag" PATH="$work/bin:$PATH" PROXY="$PROXY" STAGED="$work/staged" APPEAR_AT="$appear" \
+	run "$work/r" "$tag" MODULES=config/yaml PATH="$work/bin:$PATH" PROXY="$PROXY" STAGED="$work/staged" APPEAR_AT="$appear" \
 		CASCADE_RETRIES="$retries" CASCADE_WAIT=0
 }
 
@@ -311,25 +478,25 @@ start=$SECONDS
 
 lag 9999 3 >/dev/null 2>&1
 
-(cd "$work/r" && env TAG=v0.1.0 CASCADE_RETRIES=2 CASCADE_WAIT=100000 PATH="$work/bin:$PATH" PROXY="$PROXY" STAGED="$work/staged" APPEAR_AT=1 \
+(cd "$work/r" && env TAG=v0.1.0 MODULES=config/yaml CASCADE_RETRIES=2 CASCADE_WAIT=100000 PATH="$work/bin:$PATH" PROXY="$PROXY" STAGED="$work/staged" APPEAR_AT=1 \
 	GOPROXY="file://$PROXY" GOSUMDB=off GOWORK=off GOTOOLCHAIN=local GOFLAGS=-modcacherw GOMODCACHE="$work/modcache" \
 	timeout 20 bash "$script" >/dev/null 2>&1)
 
 [ $((SECONDS - start)) -lt 20 ] || fail "a huge wait was honoured"
 
-# --- A checkout without the yaml module ---
+# --- A checkout without one of the modules ---
 
 rm -rf "$PROXY" "$work/r"
 repo "$work/r"
 stage "$PROXY" v0.1.0
-rm -rf "$work/r/config"
+rm -rf "$work/r/config/etcd"
 tree "$work/r" >"$work/before"
 
-run "$work/r" v0.1.0 && fail "should fail without config/yaml"
-grep -q 'config/yaml' "$work/out" || fail "it does not say what is missing: $(cat "$work/out")"
+run "$work/r" v0.1.0 && fail "should fail without config/etcd"
+grep -q 'config/etcd' "$work/out" || fail "it does not say what is missing: $(cat "$work/out")"
 
 tree "$work/r" >"$work/after"
-cmp -s "$work/before" "$work/after" || fail "it changed files although config/yaml is missing"
+cmp -s "$work/before" "$work/after" || fail "it changed files although config/etcd is missing"
 
 if [ "$failures" -gt 0 ]; then
 	echo "$failures failures" >&2

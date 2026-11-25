@@ -172,6 +172,16 @@ class Headers(unittest.TestCase):
                             got = cc.check_header(header) == []
                             self.assertEqual(got, t_ok and s_ok and b_ok and (j_ok or capital_ok))
 
+    def test_the_etcd_scope_is_accepted(self):
+        self.assertEqual(cc.check_header("feat(etcd): add the provider"), [])
+
+    def test_the_scopes_are_all_in_the_docs(self):
+        claude = (pathlib.Path(__file__).resolve().parents[2] / "CLAUDE.md").read_text()
+        line = next(l for l in claude.splitlines() if l.startswith("- **Conventional commits.**"))
+
+        for scope in cc.SCOPES:
+            self.assertIn(f"`{scope}`", line, scope)
+
     def test_the_lists_are_what_the_docs_say(self):
         self.assertEqual(
             set(cc.TYPES),
@@ -179,7 +189,7 @@ class Headers(unittest.TestCase):
         )
         self.assertEqual(
             set(cc.SCOPES),
-            {"internal", "config", "watch", "interrupt", "http", "yaml", "examples", "deps"},
+            {"internal", "config", "watch", "interrupt", "http", "yaml", "etcd", "examples", "deps"},
         )
         self.assertEqual(cc.MAX_HEADER, 72)
 
@@ -301,7 +311,7 @@ class Hostile(unittest.TestCase):
         # The oracle: the form, written out again as a regular expression.
         form = re.compile(
             r"(feat|fix|docs|test|refactor|perf|ci|build|chore|revert|style)"
-            r"(\((internal|config|watch|interrupt|http|yaml|examples|deps)\))?!?: "
+            r"(\((internal|config|watch|interrupt|http|yaml|etcd|examples|deps)\))?!?: "
             r"[^\sA-Z][^\n]*",
             re.ASCII | re.DOTALL,
         )
