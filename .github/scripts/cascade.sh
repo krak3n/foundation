@@ -87,7 +87,16 @@ for module in "${modules[@]}"; do
 	if [[ ! -d $module || ! -f $module/go.mod || -L $module/go.mod ]]; then
 		refuse "${module:0:60} has no go.mod: run this from the root of the checkout"
 	fi
+
+	# Nor is a file that is written a link, which would be written through.
+	if [[ -L $module/go.sum ]]; then
+		refuse "${module:0:60}/go.sum is a link"
+	fi
 done
+
+if [[ -L .release || -L $versions ]]; then
+	refuse "$versions is a link"
+fi
 
 # A number from the environment, or the default, within 1 and max.
 bounded() {
@@ -96,6 +105,9 @@ bounded() {
 	if [[ ! $value =~ ^[0-9]{1,9}$ ]]; then
 		value="$default"
 	fi
+
+	# Base 10: bash reads 08 as an error, which would leave the number unclamped, and 010 as 8.
+	value=$((10#$value))
 
 	((value < 1)) && value=1
 	((value > max)) && value="$max"
@@ -111,25 +123,34 @@ backup="$(mktemp -d)"
 done_ok=0
 
 restore() {
+	local status=0
+
 	if [[ $done_ok != 1 ]]; then
-		cp "$backup/versions.yaml" "$versions" 2>/dev/null || true
+		cp "$backup/versions.yaml" "$versions" 2>/dev/null || status=1
 
 		local i=0
 
 		for module in "${modules[@]}"; do
-			cp "$backup/$i/go.mod" "$module/go.mod" 2>/dev/null || true
+			cp "$backup/$i/go.mod" "$module/go.mod" 2>/dev/null || status=1
 
 			if [[ -f $backup/$i/go.sum ]]; then
-				cp "$backup/$i/go.sum" "$module/go.sum" 2>/dev/null || true
+				cp "$backup/$i/go.sum" "$module/go.sum" 2>/dev/null || status=1
 			else
-				rm -f "$module/go.sum"
+				rm -f "$module/go.sum" || status=1
 			fi
 
 			i=$((i + 1))
 		done
+
+		# Said, not hidden: a tree that was not put back must not look as if it was.
+		if ((status != 0)); then
+			echo "could not put every file back: check git status before going on" >&2
+		fi
 	fi
 
 	rm -rf "$backup"
+
+	return "$status"
 }
 
 trap restore EXIT

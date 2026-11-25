@@ -148,6 +148,15 @@ exec "$real_go" "\$@"
 SH
 
 	chmod +x "$1/go"
+
+	# A sleep that takes no time and records what it was asked for, so the waits are
+	# checked by their length and not by waiting.
+	cat >"$1/sleep" <<SH
+#!/usr/bin/env bash
+echo "\$1" >>"$work/slept"
+SH
+
+	chmod +x "$1/sleep"
 }
 
 # run DIR TAG [VAR=value ...] runs the script in the checkout DIR, with the proxy and
@@ -167,7 +176,7 @@ run() {
 			TAG="$tag" MODULES="config/yaml config/etcd" \
 			GOPROXY="file://$PROXY" GOSUMDB=off GOWORK=off GOTOOLCHAIN=local GOFLAGS=-modcacherw \
 			GOMODCACHE="$work/modcache" \
-			"$@" bash "$script"
+			"$@" timeout 30 bash "$script"
 	) >"$work/out" 2>&1
 }
 
@@ -340,6 +349,9 @@ for tag in "${hostile[@]}"; do
 
 	# The reason is a line or two, and does not run on with what it was given.
 	[ "$(wc -c <"$work/out")" -lt 600 ] || fail "$(printf %q "${tag:0:40}"): a reason of $(wc -c <"$work/out") bytes"
+
+	# It was the script that refused, in words (${tag@Q} is not in every bash).
+	grep -q '^refusing' "$work/out" || fail "$(printf %q "${tag:0:40}"): no refusal in the output: $(head -c 200 "$work/out")"
 done
 
 # --- A module list that is not plain is refused before anything changes ---
@@ -415,6 +427,27 @@ for list in "${modules_hostile[@]}"; do
 	grep -q '^refusing' "$work/out" || fail "$(printf %q "${list:0:40}"): no refusal in the output: $(head -c 200 "$work/out")"
 done
 
+# --- A link where the script writes is refused too, so nothing is written through it ---
+
+for victim in config/etcd/go.sum config/yaml/go.sum .release/versions.yaml; do
+	rm -rf "$PROXY" "$work/r" "$work/outside"
+	repo "$work/r"
+	stage "$PROXY" v0.1.0
+	printf 'outside\n' >"$work/outside"
+	rm -f "$work/r/$victim"
+	ln -s "$work/outside" "$work/r/$victim"
+	tree "$work/r" >"$work/before"
+
+	if run "$work/r" v0.1.0 CASCADE_WAIT=0; then
+		fail "$victim is a link: should refuse"
+	fi
+
+	tree "$work/r" >"$work/after"
+	cmp -s "$work/before" "$work/after" || fail "$victim is a link: files changed"
+	[ "$(cat "$work/outside")" = outside ] || fail "$victim is a link: it was written through"
+	grep -q '^refusing' "$work/out" || fail "$victim is a link: no refusal in the output: $(head -c 200 "$work/out")"
+done
+
 # No list at all.
 rm -rf "$PROXY" "$work/r"
 repo "$work/r"
@@ -447,7 +480,7 @@ lag() {
 	tree "$work/r" >"$work/before"
 
 	run "$work/r" "$tag" MODULES=config/yaml PATH="$work/bin:$PATH" PROXY="$PROXY" STAGED="$work/staged" APPEAR_AT="$appear" \
-		CASCADE_RETRIES="$retries" CASCADE_WAIT=0
+		CASCADE_RETRIES="$retries" CASCADE_WAIT="${LAG_WAIT:-0}"
 }
 
 # It appears on the third try, within five.
@@ -473,16 +506,34 @@ fi
 
 [ "$(cat "$work/count")" -le 10 ] || fail "$(cat "$work/count") attempts: the number of tries is not bounded"
 
-# So is the wait between them.
-start=$SECONDS
+# So is the wait between them, and a number with leading zeros is a number, not octal
+# (bash reads 08 as an error and 010 as 8, which would have lifted both bounds).
+waited() {
+	rm -f "$work/slept"
 
-lag 9999 3 >/dev/null 2>&1
+	LAG_WAIT="$1" lag 9999 2 >/dev/null 2>&1 || true
 
-(cd "$work/r" && env TAG=v0.1.0 MODULES=config/yaml CASCADE_RETRIES=2 CASCADE_WAIT=100000 PATH="$work/bin:$PATH" PROXY="$PROXY" STAGED="$work/staged" APPEAR_AT=1 \
-	GOPROXY="file://$PROXY" GOSUMDB=off GOWORK=off GOTOOLCHAIN=local GOFLAGS=-modcacherw GOMODCACHE="$work/modcache" \
-	timeout 20 bash "$script" >/dev/null 2>&1)
+	cat "$work/slept" 2>/dev/null | head -1
+}
 
-[ $((SECONDS - start)) -lt 20 ] || fail "a huge wait was honoured"
+[ "$(waited 100000)" = 60 ] || fail "a huge wait was not cut to 60: $(waited 100000)"
+[ "$(waited 080)" = 60 ] || fail "CASCADE_WAIT=080 was not cut to 60: $(waited 080)"
+[ "$(waited 010)" = 10 ] || fail "CASCADE_WAIT=010 was not 10: $(waited 010)"
+[ "$(waited 5)" = 5 ] || fail "CASCADE_WAIT=5 was not 5: $(waited 5)"
+[ "$(waited 0)" = 1 ] || fail "CASCADE_WAIT=0 was not raised to 1: $(waited 0)"
+[ "$(waited abc)" = 15 ] || fail "CASCADE_WAIT=abc was not the default 15: $(waited abc)"
+
+# The number of tries, the same way.
+tries() {
+	lag 9999 "$1" >/dev/null 2>&1 || true
+
+	cat "$work/count"
+}
+
+[ "$(tries 08)" = 8 ] || fail "CASCADE_RETRIES=08 gave $(tries 08) tries, want 8"
+[ "$(tries 09)" = 9 ] || fail "CASCADE_RETRIES=09 gave $(tries 09) tries, want 9"
+[ "$(tries 010)" = 10 ] || fail "CASCADE_RETRIES=010 gave $(tries 010) tries, want 10"
+[ "$(tries 011)" = 10 ] || fail "CASCADE_RETRIES=011 gave $(tries 011) tries, want 10 at most"
 
 # --- A checkout without one of the modules ---
 
