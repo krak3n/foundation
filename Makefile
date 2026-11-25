@@ -75,13 +75,14 @@ lint-workflows:
 	@# zizmor is installed separately (brew install zizmor); CI runs it too, online.
 	@if command -v zizmor >/dev/null 2>&1; then zizmor --offline --no-progress .github; else echo "zizmor is not installed: skipped (CI runs it)"; fi
 
-# Every go.mod asks for the oldest Go the project supports: the release before the
-# current stable one (CI checks it, see .github/scripts/check_go_versions.py). When
-# a release ships, the check goes red and this is the fix: make go-version GO=1.27
+# Every go.mod asks for the oldest Go the project supports: the first release of the
+# one before the current stable (go 1.26.0 while 1.27 is stable; CI checks it, see
+# .github/scripts/check_go_versions.py). When a release ships, the check goes red and
+# this is the fix: make go-version GO=1.27
 .PHONY: go-version
 go-version:
 	@case "$(GO)" in 1.[1-9]|1.[1-9][0-9]|1.[1-9][0-9][0-9]) ;; *) echo "GO is required, as a release such as 1.26" >&2; exit 1;; esac
 	@set -e; for dir in $$(find . -name go.mod -not -path '*/testdata/*' -exec dirname {} \;); do \
-		echo "go $(GO): $${dir}"; \
-		(cd "$${dir}" && go mod edit -go=$(GO)); \
+		echo "go $(GO).0: $${dir}"; \
+		(cd "$${dir}" && go mod edit -go=$(GO).0); \
 	done
