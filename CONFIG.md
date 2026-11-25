@@ -24,7 +24,7 @@ Configuration comes from four **layers**, in an order the framework fixes (lowes
 | Layer | Marker (`config`) | Default |
 |---|---|---|
 | Document | `DocumentLayer` | nothing: no file is read unless the program names it |
-| Remote | `RemoteLayer` | nothing |
+| Remote | `RemoteLayer` | `etcd.New(client, prefix)` (`config/etcd`) |
 | Environment | `EnvironmentLayer` | `env.New()` |
 | Command | `CommandLayer` | `flags.New(flags.WithArgs(args))`, only when the program gave `foundation.WithArgs` |
 
@@ -52,7 +52,7 @@ Options apply in the order they are given, so `Set` after `With` discards what w
 func companyConfig() foundation.Option {
 	return foundation.Options{
 		foundation.WithDocumentConfig(yaml.File("/etc/shop/config.yaml")),
-		foundation.WithRemoteConfig(etcd.New(etcd.WithEndpoints("..."))), // a remote provider: none exists yet
+		foundation.WithRemoteConfig(etcd.New(client, "/services/shop")), // the etcd provider, with a client the program made
 	}
 }
 
@@ -86,7 +86,7 @@ foundation.Run("shop", fn, foundation.WithDocumentConfig(json.Dir("/etc/shop/con
 
 Many systems create files as `0664` (a umask of `0002`), which fails the check until the group bit is removed. Where the deployment can't give the file tighter modes, such as a Kubernetes volume with a loose `defaultMode`, a program turns the check off for that provider, in code: `json.File(path, config.WithoutPermissionCheck())`. Nothing in the environment or a document can turn it off.
 
-The remote layer is for a configuration service shared by a fleet (etcd or similar), which would be a provider module of its own like YAML. It sits above the documents, because a fleet's settings override the file a build ships with, and below the environment, because what is set on one process overrides both. Nothing implements it yet.
+The remote layer is for a configuration service shared by a fleet (etcd or similar), which is a provider module of its own like YAML (`config/etcd`, with the official client). It sits above the documents, because a fleet's settings override the file a build ships with, and below the environment, because what is set on one process overrides both. A field is one key, `<prefix>/<function path words in lower case>/<field name as written>`, so the case of a field name matters there (the other providers don't care), and a function's keys are not kept apart from those of a nested struct with the same name. Values are text, read as they are (no trailing newline is removed: `etcdctl put key < file` adds one). All the keys of a struct are read in one read-only transaction; a cluster that can't be read stops startup, it never falls back to the file.
 
 ### Explicit providers
 
