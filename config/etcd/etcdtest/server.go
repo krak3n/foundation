@@ -39,10 +39,6 @@ type Option interface {
 	apply(*Server)
 }
 
-type optionFunc func(*Server)
-
-func (f optionFunc) apply(s *Server) { f(s) }
-
 // WithKV makes the server answer the key value calls with kv instead of its own
 // keys, so that a test can send what no honest server would: an answer for a key
 // that was not asked for, an enormous value, an error that names a secret. The
@@ -103,15 +99,6 @@ func NewServer(tb testing.TB, opts ...Option) *Server {
 	return s
 }
 
-// record keeps every call, before it is answered.
-func (s *Server) record(ctx context.Context, req any, info *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
-	s.mu.Lock()
-	s.calls = append(s.calls, Call{Method: info.FullMethod, Request: req})
-	s.mu.Unlock()
-
-	return next(ctx, req)
-}
-
 // Close stops the server now, so that a test can see what a program does when it
 // is gone. It is also done when the test ends, and doing it twice is fine.
 func (s *Server) Close() { s.srv.Stop() }
@@ -163,6 +150,19 @@ func (s *Server) Calls() []Call {
 
 	return append([]Call(nil), s.calls...)
 }
+
+// record keeps every call, before it is answered.
+func (s *Server) record(ctx context.Context, req any, info *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+	s.mu.Lock()
+	s.calls = append(s.calls, Call{Method: info.FullMethod, Request: req})
+	s.mu.Unlock()
+
+	return next(ctx, req)
+}
+
+type optionFunc func(*Server)
+
+func (f optionFunc) apply(s *Server) { f(s) }
 
 // newCertificate makes a certificate for 127.0.0.1 that is its own authority, and a
 // pool that trusts it and nothing else.
@@ -218,6 +218,69 @@ type store struct {
 
 func newStore() *store {
 	return &store{rev: 1, data: map[string][]byte{}, mod: map[string]int64{}}
+}
+
+// Range answers a read.
+func (st *store) Range(_ context.Context, req *etcdserverpb.RangeRequest) (*etcdserverpb.RangeResponse, error) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+
+	return st.rangeLocked(req), nil
+}
+
+// Put sets a key.
+func (st *store) Put(_ context.Context, req *etcdserverpb.PutRequest) (*etcdserverpb.PutResponse, error) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+
+	st.putLocked(string(req.Key), req.Value)
+
+	return &etcdserverpb.PutResponse{Header: st.header()}, nil
+}
+
+// DeleteRange removes keys.
+func (st *store) DeleteRange(_ context.Context, req *etcdserverpb.DeleteRangeRequest) (*etcdserverpb.DeleteRangeResponse, error) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+
+	n := st.deleteLocked(string(req.Key), string(req.RangeEnd))
+
+	return &etcdserverpb.DeleteRangeResponse{Header: st.header(), Deleted: n}, nil
+}
+
+// Txn runs the operations of a transaction that has no comparisons: all of them
+// are applied together, so a reader sees one revision. A comparison is not
+// supported, and says so, rather than being treated as true.
+func (st *store) Txn(_ context.Context, req *etcdserverpb.TxnRequest) (*etcdserverpb.TxnResponse, error) {
+	if len(req.Compare) > 0 {
+		return nil, status.Error(codes.Unimplemented, "etcdtest: comparisons are not supported")
+	}
+
+	st.mu.Lock()
+	defer st.mu.Unlock()
+
+	resp := &etcdserverpb.TxnResponse{Succeeded: true}
+
+	for _, op := range req.Success {
+		switch r := op.Request.(type) {
+		case *etcdserverpb.RequestOp_RequestRange:
+			resp.Responses = append(resp.Responses, &etcdserverpb.ResponseOp{Response: &etcdserverpb.ResponseOp_ResponseRange{ResponseRange: st.rangeLocked(r.RequestRange)}})
+		case *etcdserverpb.RequestOp_RequestPut:
+			st.putLocked(string(r.RequestPut.Key), r.RequestPut.Value)
+
+			resp.Responses = append(resp.Responses, &etcdserverpb.ResponseOp{Response: &etcdserverpb.ResponseOp_ResponsePut{ResponsePut: &etcdserverpb.PutResponse{}}})
+		case *etcdserverpb.RequestOp_RequestDeleteRange:
+			n := st.deleteLocked(string(r.RequestDeleteRange.Key), string(r.RequestDeleteRange.RangeEnd))
+
+			resp.Responses = append(resp.Responses, &etcdserverpb.ResponseOp{Response: &etcdserverpb.ResponseOp_ResponseDeleteRange{ResponseDeleteRange: &etcdserverpb.DeleteRangeResponse{Deleted: n}}})
+		default:
+			return nil, status.Error(codes.Unimplemented, "etcdtest: that operation is not supported")
+		}
+	}
+
+	resp.Header = st.header()
+
+	return resp, nil
 }
 
 func (st *store) put(key string, value []byte) {
@@ -313,67 +376,4 @@ func (st *store) rangeLocked(req *etcdserverpb.RangeRequest) *etcdserverpb.Range
 	}
 
 	return resp
-}
-
-// Range answers a read.
-func (st *store) Range(_ context.Context, req *etcdserverpb.RangeRequest) (*etcdserverpb.RangeResponse, error) {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-
-	return st.rangeLocked(req), nil
-}
-
-// Put sets a key.
-func (st *store) Put(_ context.Context, req *etcdserverpb.PutRequest) (*etcdserverpb.PutResponse, error) {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-
-	st.putLocked(string(req.Key), req.Value)
-
-	return &etcdserverpb.PutResponse{Header: st.header()}, nil
-}
-
-// DeleteRange removes keys.
-func (st *store) DeleteRange(_ context.Context, req *etcdserverpb.DeleteRangeRequest) (*etcdserverpb.DeleteRangeResponse, error) {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-
-	n := st.deleteLocked(string(req.Key), string(req.RangeEnd))
-
-	return &etcdserverpb.DeleteRangeResponse{Header: st.header(), Deleted: n}, nil
-}
-
-// Txn runs the operations of a transaction that has no comparisons: all of them
-// are applied together, so a reader sees one revision. A comparison is not
-// supported, and says so, rather than being treated as true.
-func (st *store) Txn(_ context.Context, req *etcdserverpb.TxnRequest) (*etcdserverpb.TxnResponse, error) {
-	if len(req.Compare) > 0 {
-		return nil, status.Error(codes.Unimplemented, "etcdtest: comparisons are not supported")
-	}
-
-	st.mu.Lock()
-	defer st.mu.Unlock()
-
-	resp := &etcdserverpb.TxnResponse{Succeeded: true}
-
-	for _, op := range req.Success {
-		switch r := op.Request.(type) {
-		case *etcdserverpb.RequestOp_RequestRange:
-			resp.Responses = append(resp.Responses, &etcdserverpb.ResponseOp{Response: &etcdserverpb.ResponseOp_ResponseRange{ResponseRange: st.rangeLocked(r.RequestRange)}})
-		case *etcdserverpb.RequestOp_RequestPut:
-			st.putLocked(string(r.RequestPut.Key), r.RequestPut.Value)
-
-			resp.Responses = append(resp.Responses, &etcdserverpb.ResponseOp{Response: &etcdserverpb.ResponseOp_ResponsePut{ResponsePut: &etcdserverpb.PutResponse{}}})
-		case *etcdserverpb.RequestOp_RequestDeleteRange:
-			n := st.deleteLocked(string(r.RequestDeleteRange.Key), string(r.RequestDeleteRange.RangeEnd))
-
-			resp.Responses = append(resp.Responses, &etcdserverpb.ResponseOp{Response: &etcdserverpb.ResponseOp_ResponseDeleteRange{ResponseDeleteRange: &etcdserverpb.DeleteRangeResponse{Deleted: n}}})
-		default:
-			return nil, status.Error(codes.Unimplemented, "etcdtest: that operation is not supported")
-		}
-	}
-
-	resp.Header = st.header()
-
-	return resp, nil
 }

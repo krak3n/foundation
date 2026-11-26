@@ -56,10 +56,6 @@ type Option interface {
 	apply(*Provider)
 }
 
-type optionFunc func(*Provider)
-
-func (f optionFunc) apply(p *Provider) { f(p) }
-
 // WithTimeout sets how long one read of a struct may take, from MinTimeout to
 // MaxTimeout; the default is DefaultTimeout. A value outside them is an error when
 // the provider is used, never clamped.
@@ -95,6 +91,183 @@ func New(client *clientv3.Client, prefix string, opts ...Option) *Provider {
 // RemoteLayer marks the provider as the remote layer.
 func (*Provider) RemoteLayer() {}
 
+// Describe lists the key of each field of dst for the function at path, without
+// reading anything.
+func (p *Provider) Describe(path []string, dst any) ([]config.FieldKey, error) {
+	leaves, errs, err := p.plan(path, dst)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(leaves) > MaxFields {
+		return nil, errors.Join(append(errs, invalid("too many fields to read at once"))...)
+	}
+
+	keys := make([]config.FieldKey, len(leaves))
+	for i, l := range leaves {
+		keys[i] = config.FieldKey{Field: l.field, Key: l.key}
+	}
+
+	keys, err = config.Annotate("etcd", dst, keys)
+
+	return keys, errors.Join(append(errs, err)...)
+}
+
+// Unmarshal reads the keys of the fields of dst for the function at path in one
+// transaction. A key that is not there leaves its field alone. If the cluster
+// can't be read, or answers in a way that no honest one would, nothing is set.
+func (p *Provider) Unmarshal(path []string, dst any) error {
+	leaves, errs, err := p.plan(path, dst)
+	if err != nil {
+		return err
+	}
+
+	if len(leaves) > MaxFields {
+		return errors.Join(append(errs, invalid("too many fields to read at once"))...)
+	}
+
+	if len(leaves) == 0 {
+		return errors.Join(errs...)
+	}
+
+	values, err := p.read(leaves)
+	if err != nil {
+		return err
+	}
+
+	for i, l := range leaves {
+		v := values[i]
+		if v == nil {
+			continue
+		}
+
+		fe := func(reason error) error {
+			return &config.FieldError{Provider: "etcd", Field: l.field, Key: l.key, Err: reason}
+		}
+
+		switch {
+		case len(*v) > MaxValueBytes:
+			errs = append(errs, fe(errors.New("value too large")))
+		case !utf8.ValidString(*v) || strings.ContainsRune(*v, 0):
+			errs = append(errs, fe(errors.New("value is not valid text")))
+		case *v == "" && !config.IsPlainString(l.value.Type()):
+			// An empty value is not set, so that a stray empty key doesn't wipe a
+			// default out or fail to parse.
+		default:
+			if err := config.SetString(l.value, *v); err != nil {
+				errs = append(errs, fe(err))
+			}
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+// check says what is wrong with the prefix and the timeout, if anything.
+func (p *Provider) check() error {
+	if p.timeout < MinTimeout || p.timeout > MaxTimeout {
+		return invalid("invalid timeout: it must be between " + MinTimeout.String() + " and " + MaxTimeout.String())
+	}
+
+	return checkPrefix(p.prefix)
+}
+
+// plan checks the provider and dst and lists what to read.
+func (p *Provider) plan(path []string, dst any) ([]leaf, []error, error) {
+	elem, err := structOf(dst)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if err := p.check(); err != nil {
+		return nil, nil, err
+	}
+
+	dir := p.prefix
+
+	for _, k := range config.Keys(path) {
+		dir += "/" + strings.ToLower(k)
+	}
+
+	var leaves []leaf
+
+	errs := walk(elem, dir, "", map[string]string{}, &leaves)
+
+	return leaves, errs, nil
+}
+
+// read asks for every key in one transaction and checks the answer, returning a
+// value for each key that is there, in the order asked. An answer that is not
+// exactly what was asked is an error, whatever else it holds.
+func (p *Provider) read(leaves []leaf) (values []*string, err error) {
+	// A client that was not made by clientv3.New has no connection, and the call
+	// panics: that is a failure to read, not a crash at startup.
+	defer func() {
+		if recover() != nil {
+			values, err = nil, &readError{reason: "request failed"}
+		}
+	}()
+
+	if p.client == nil {
+		return nil, invalid("no client")
+	}
+
+	req := &etcdserverpb.TxnRequest{}
+
+	for _, l := range leaves {
+		req.Success = append(req.Success, &etcdserverpb.RequestOp{
+			Request: &etcdserverpb.RequestOp_RequestRange{RequestRange: &etcdserverpb.RangeRequest{Key: []byte(l.key), Limit: 1}},
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
+	defer cancel()
+
+	resp, err := clientv3.RetryKVClient(p.client).Txn(ctx, req, grpc.MaxCallRecvMsgSize(maxResponse), grpc.WaitForReady(true))
+	if err != nil {
+		return nil, failure(ctx, err)
+	}
+
+	wrong := &readError{reason: "the answer is not what was asked for"}
+
+	if resp == nil || !resp.Succeeded || len(resp.Responses) != len(leaves) {
+		return nil, wrong
+	}
+
+	var total int
+
+	values = make([]*string, len(leaves))
+
+	for i, l := range leaves {
+		rr := resp.Responses[i].GetResponseRange()
+		if rr == nil || len(rr.Kvs) > 1 {
+			return nil, wrong
+		}
+
+		if len(rr.Kvs) == 0 {
+			continue
+		}
+
+		kv := rr.Kvs[0]
+		if kv == nil || string(kv.Key) != l.key {
+			return nil, wrong
+		}
+
+		if total += len(kv.Value); total > MaxTotalBytes {
+			return nil, &readError{reason: "answer too large"}
+		}
+
+		v := string(kv.Value)
+		values[i] = &v
+	}
+
+	return values, nil
+}
+
+type optionFunc func(*Provider)
+
+func (f optionFunc) apply(p *Provider) { f(p) }
+
 // A readError is a failure to read, with a fixed reason. The error of the client
 // is not kept: it can name an address, a key or a user.
 type readError struct {
@@ -103,6 +276,7 @@ type readError struct {
 }
 
 func (e *readError) Error() string { return "etcd: could not read configuration: " + e.reason }
+
 func (e *readError) Unwrap() error { return e.cause }
 
 // failure turns what a call returned into a reason. The deadline is the only cause
@@ -131,15 +305,6 @@ func failure(ctx context.Context, err error) error {
 // invalid is the error for a mistake in the provider's own settings, without the
 // setting.
 func invalid(reason string) error { return errors.New("etcd: " + reason) }
-
-// check says what is wrong with the prefix and the timeout, if anything.
-func (p *Provider) check() error {
-	if p.timeout < MinTimeout || p.timeout > MaxTimeout {
-		return invalid("invalid timeout: it must be between " + MinTimeout.String() + " and " + MaxTimeout.String())
-	}
-
-	return checkPrefix(p.prefix)
-}
 
 func checkPrefix(prefix string) error {
 	reason := ""
@@ -354,168 +519,4 @@ func goPath(prefix, name string) string {
 	}
 
 	return prefix + "." + name
-}
-
-// plan checks the provider and dst and lists what to read.
-func (p *Provider) plan(path []string, dst any) ([]leaf, []error, error) {
-	elem, err := structOf(dst)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	if err := p.check(); err != nil {
-		return nil, nil, err
-	}
-
-	dir := p.prefix
-
-	for _, k := range config.Keys(path) {
-		dir += "/" + strings.ToLower(k)
-	}
-
-	var leaves []leaf
-
-	errs := walk(elem, dir, "", map[string]string{}, &leaves)
-
-	return leaves, errs, nil
-}
-
-// Describe lists the key of each field of dst for the function at path, without
-// reading anything.
-func (p *Provider) Describe(path []string, dst any) ([]config.FieldKey, error) {
-	leaves, errs, err := p.plan(path, dst)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(leaves) > MaxFields {
-		return nil, errors.Join(append(errs, invalid("too many fields to read at once"))...)
-	}
-
-	keys := make([]config.FieldKey, len(leaves))
-	for i, l := range leaves {
-		keys[i] = config.FieldKey{Field: l.field, Key: l.key}
-	}
-
-	keys, err = config.Annotate("etcd", dst, keys)
-
-	return keys, errors.Join(append(errs, err)...)
-}
-
-// Unmarshal reads the keys of the fields of dst for the function at path in one
-// transaction. A key that is not there leaves its field alone. If the cluster
-// can't be read, or answers in a way that no honest one would, nothing is set.
-func (p *Provider) Unmarshal(path []string, dst any) error {
-	leaves, errs, err := p.plan(path, dst)
-	if err != nil {
-		return err
-	}
-
-	if len(leaves) > MaxFields {
-		return errors.Join(append(errs, invalid("too many fields to read at once"))...)
-	}
-
-	if len(leaves) == 0 {
-		return errors.Join(errs...)
-	}
-
-	values, err := p.read(leaves)
-	if err != nil {
-		return err
-	}
-
-	for i, l := range leaves {
-		v := values[i]
-		if v == nil {
-			continue
-		}
-
-		fe := func(reason error) error {
-			return &config.FieldError{Provider: "etcd", Field: l.field, Key: l.key, Err: reason}
-		}
-
-		switch {
-		case len(*v) > MaxValueBytes:
-			errs = append(errs, fe(errors.New("value too large")))
-		case !utf8.ValidString(*v) || strings.ContainsRune(*v, 0):
-			errs = append(errs, fe(errors.New("value is not valid text")))
-		case *v == "" && !config.IsPlainString(l.value.Type()):
-			// An empty value is not set, so that a stray empty key doesn't wipe a
-			// default out or fail to parse.
-		default:
-			if err := config.SetString(l.value, *v); err != nil {
-				errs = append(errs, fe(err))
-			}
-		}
-	}
-
-	return errors.Join(errs...)
-}
-
-// read asks for every key in one transaction and checks the answer, returning a
-// value for each key that is there, in the order asked. An answer that is not
-// exactly what was asked is an error, whatever else it holds.
-func (p *Provider) read(leaves []leaf) (values []*string, err error) {
-	// A client that was not made by clientv3.New has no connection, and the call
-	// panics: that is a failure to read, not a crash at startup.
-	defer func() {
-		if recover() != nil {
-			values, err = nil, &readError{reason: "request failed"}
-		}
-	}()
-
-	if p.client == nil {
-		return nil, invalid("no client")
-	}
-
-	req := &etcdserverpb.TxnRequest{}
-
-	for _, l := range leaves {
-		req.Success = append(req.Success, &etcdserverpb.RequestOp{
-			Request: &etcdserverpb.RequestOp_RequestRange{RequestRange: &etcdserverpb.RangeRequest{Key: []byte(l.key), Limit: 1}},
-		})
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
-	defer cancel()
-
-	resp, err := clientv3.RetryKVClient(p.client).Txn(ctx, req, grpc.MaxCallRecvMsgSize(maxResponse), grpc.WaitForReady(true))
-	if err != nil {
-		return nil, failure(ctx, err)
-	}
-
-	wrong := &readError{reason: "the answer is not what was asked for"}
-
-	if resp == nil || !resp.Succeeded || len(resp.Responses) != len(leaves) {
-		return nil, wrong
-	}
-
-	var total int
-
-	values = make([]*string, len(leaves))
-
-	for i, l := range leaves {
-		rr := resp.Responses[i].GetResponseRange()
-		if rr == nil || len(rr.Kvs) > 1 {
-			return nil, wrong
-		}
-
-		if len(rr.Kvs) == 0 {
-			continue
-		}
-
-		kv := rr.Kvs[0]
-		if kv == nil || string(kv.Key) != l.key {
-			return nil, wrong
-		}
-
-		if total += len(kv.Value); total > MaxTotalBytes {
-			return nil, &readError{reason: "answer too large"}
-		}
-
-		v := string(kv.Value)
-		values[i] = &v
-	}
-
-	return values, nil
 }
